@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  keyvault-app:
+    build: .
+    command: ["--vaultName", "kv-analytics-profuse-dev", "--outputPath", "output"]
+    volumes:
+      - ./:/app/output
+
+  validator:
+    image: alpine
+    depends_on:
+      - keyvault-app
+    volumes:
+      - ./:/app/output
+    entrypoint: ["sh", "-c", "while [ ! -f /app/output/.env ]; do echo 'Waiting for .env file...'; sleep 2; done; ls -la /app/output && cat /app/output/.env"]
