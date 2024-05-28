@@ -14,7 +14,7 @@ RUN go mod tidy && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o main .
 FROM alpine:latest
 
 # Define o diretório de trabalho no container final
-WORKDIR /app
+WORKDIR /kvcli
 
 # Copia o binário compilado da imagem de build
 COPY --from=builder /app/main .

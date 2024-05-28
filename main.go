@@ -4,14 +4,16 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
-	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets"
 )
 
 func main() {
@@ -19,15 +21,30 @@ func main() {
 	vaultName := flag.String("vaultName", "", "Name of the Azure Key Vault")
 	appName := flag.String("appName", "", "Name of the application (optional)")
 	outputPath := flag.String("outputPath", ".", "Path to save the .env file (optional)")
+	subscription := flag.String("subscription", "", "Azure Subscription ID (optional)")
+	loginParams := flag.String("loginParams", "", "Additional parameters for 'az login' (optional)")
 	flag.Parse()
 
 	// Verificando se o vaultName foi fornecido
 	if *vaultName == "" {
-		log.Fatalf("Usage: %s --vaultName <vaultName> [--appName <appName>] [--outputPath <outputPath>]", os.Args[0])
+		log.Fatalf("Usage: %s --vaultName <vaultName> [--appName <appName>] [--outputPath <outputPath>] [--subscription <subscription>] [--loginParams <loginParams>]", os.Args[0])
+	}
+
+	// Verifica se o usuário está logado
+	if err := ensureAzureLogin(*loginParams); err != nil {
+		log.Fatalf("failed to ensure Azure login: %v", err)
+	}
+
+	// Configurar a assinatura do Azure, se fornecida
+	if *subscription != "" {
+		err := setAzureSubscription(*subscription)
+		if err != nil {
+			log.Fatalf("failed to set Azure subscription: %v", err)
+		}
 	}
 
 	outputFilename := filepath.Join(*outputPath, ".env")
-	//fmt.Println(outputFilename)
+
 	// Verifica se o diretório de saída existe, caso contrário, cria o diretório
 	if _, err := os.Stat(*outputPath); os.IsNotExist(err) {
 		err = os.MkdirAll(*outputPath, 0755)
@@ -63,15 +80,48 @@ func main() {
 	saveSecretsToFile(client, *appName, outputFilename)
 }
 
-func authenticate(vaultUrl string) (azcore.TokenCredential, error) {
-	cred, err := azidentity.NewDeviceCodeCredential(&azidentity.DeviceCodeCredentialOptions{
-		UserPrompt: func(ctx context.Context, deviceCode azidentity.DeviceCodeMessage) error {
-			fmt.Println(deviceCode.Message)
-			return nil
-		},
-	})
+func ensureAzureLogin(loginParams string) error {
+	cmd := exec.Command("az", "account", "list")
+	output, err := cmd.CombinedOutput()
+	if err != nil || strings.Contains(string(output), "Please run \"az login\" to access your accounts.") {
+		log.Println("Você não está logado, executando 'az login' para efetuar o login...")
+		loginCmdArgs := []string{"login"}
+		if loginParams != "" {
+			loginCmdArgs = append(loginCmdArgs, strings.Split(loginParams, " ")...)
+		}
+		loginCmd := exec.Command("az", loginCmdArgs...)
+		loginCmd.Stdout = os.Stdout
+		loginCmd.Stderr = os.Stderr
+		if loginErr := loginCmd.Run(); loginErr != nil {
+			return fmt.Errorf("failed to execute 'az login': %w", loginErr)
+		}
+		log.Println("Login successful.")
+		// Verifica o login novamente
+		cmd = exec.Command("az", "account", "list")
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to list Azure accounts after login: %s", string(output))
+		}
+	}
+	return nil
+}
+
+func setAzureSubscription(subscriptionID string) error {
+	log.Printf("Setting Azure subscription to %s\n", subscriptionID)
+	cmd := exec.Command("az", "account", "set", "--subscription", subscriptionID)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("failed to set Azure subscription: %s", string(output))
+	}
+	log.Printf("Azure subscription set to %s successfully\n", subscriptionID)
+	return nil
+}
+
+func authenticate(vaultUrl string) (azcore.TokenCredential, error) {
+	log.Println("Authenticating with Azure CLI credentials...")
+	cred, err := azidentity.NewAzureCLICredential(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Azure CLI credential: %w", err)
 	}
 
 	// Aumenta o tempo de espera para a autenticação
@@ -81,12 +131,13 @@ func authenticate(vaultUrl string) (azcore.TokenCredential, error) {
 	// Teste a credencial para garantir que ela funcione
 	client, err := azsecrets.NewClient(vaultUrl, cred, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create KeyVault client for authentication test: %w", err)
 	}
 	if err := checkAuthenticationWithContext(ctx, client); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("authentication test failed: %w", err)
 	}
 
+	log.Println("Authentication successful.")
 	return cred, nil
 }
 
@@ -130,7 +181,6 @@ func saveSecretsToFile(client *azsecrets.Client, appName, outputFilename string)
 			}
 			envVarName := strings.ReplaceAll(secretName, "-", "_")
 			envVarValue := *resp.Value
-			//fmt.Println(output)
 			fmt.Fprintf(output, "%s=%s\n", envVarName, envVarValue)
 		}
 	}

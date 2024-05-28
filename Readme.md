@@ -100,3 +100,8 @@ docker-compose up
 ## Contribuição
 
 Sinta-se à vontade para contribuir para este projeto enviando pull requests ou abrindo issues. Certifique-se de seguir o [código de conduta](CODE_OF_CONDUCT.md) e as diretrizes de contribuição.
+
+
+## Referencias
+
+https://ravichaganti.com/blog/azure-sdk-for-go-authentication-methods-for-local-dev-environment/
