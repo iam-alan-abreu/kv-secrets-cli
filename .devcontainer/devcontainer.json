@@ -22,7 +22,7 @@
 	// "forwardPorts": [],
 
 	// Uncomment the next line to run commands after the container is created.
-	"postCreateCommand": "go get",
+	"postCreateCommand": "./main --vaultName pockvperebas --outputPath test --subscription 364e1ee6-25aa-4d4b-954e-d93a330e05b7 --setToEnvironment true",
 
 	// Configure tool-specific properties.
 	"customizations": {

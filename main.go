@@ -1,13 +1,16 @@
 package main
 
 import (
-	"flag"
-	"log"
-	"os"
-	"path/filepath"
 	"cli-kv/autentication"
 	"cli-kv/azcli"
 	"cli-kv/secrets"
+	"cli-kv/utils"
+	"flag"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets"
 )
 
@@ -18,6 +21,7 @@ func main() {
 	outputPath := flag.String("outputPath", ".", "Path to save the .env file (optional)")
 	subscription := flag.String("subscription", "", "Azure Subscription ID (optional)")
 	loginParams := flag.String("loginParams", "", "Additional parameters for 'az login' (optional)")
+	setToEnvironment := flag.String("setToEnvironment", "false", "true to set the variables to the environment (optional)")
 	flag.Parse()
 
 	// Verificando se o vaultName foi fornecido
@@ -40,18 +44,20 @@ func main() {
 
 	outputFilename := filepath.Join(*outputPath, ".env")
 
-	// Verifica se o diretório de saída existe, caso contrário, cria o diretório
-	if _, err := os.Stat(*outputPath); os.IsNotExist(err) {
-		err = os.MkdirAll(*outputPath, 0755)
-		if err != nil {
-			log.Fatalf("failed to create output directory: %v", err)
+	if *setToEnvironment == "false" {
+		// Verifica se o diretório de saída existe, caso contrário, cria o diretório
+		if _, err := os.Stat(*outputPath); os.IsNotExist(err) {
+			err = os.MkdirAll(*outputPath, 0755)
+			if err != nil {
+				log.Fatalf("failed to create output directory: %v", err)
+			}
 		}
-	}
 
-	// Verifica se o arquivo já existe
-	if _, err := os.Stat(outputFilename); err == nil {
-		log.Printf("Output file %s already exists. Exiting without doing anything.\n", outputFilename)
-		return
+		// Verifica se o arquivo já existe
+		if _, err := os.Stat(outputFilename); err == nil {
+			log.Printf("Output file %s already exists. Exiting without doing anything.\n", outputFilename)
+			return
+		}
 	}
 
 	vaultUrl := "https://" + *vaultName + ".vault.azure.net"
@@ -71,8 +77,39 @@ func main() {
 		log.Fatalf("authentication failed: %v", err)
 	}
 
-	// Obter segredos do Key Vault e salvar em um arquivo .env
-	secrets.SaveSecretsToFile(client, *appName, outputFilename)
+	if *setToEnvironment == "true" && *setToEnvironment != "" {
+		fmt.Println("Entrendo segredos do Key Vault e setando para o ambiente")
+		secrets.SaveSecretsToFile(client, *appName, "/tmp/environment")
+
+		// Define os caminhos dos arquivos
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Printf("Erro ao obter o diretório home: %v\n", err)
+			return
+		}
+
+		bashrcPath := filepath.Join(homeDir, ".bashrc")
+		zshrcPath := filepath.Join(homeDir, ".zshrc")
+		lineToAdd := "source ${BASH_SOURCE[0]%/*}/tmp/environment"
+
+		// Adiciona a linha aos arquivos, se existirem
+		err = utils.AddLineIfFileExists(bashrcPath, lineToAdd)
+		if err != nil {
+			fmt.Printf("Erro ao adicionar linha ao .bashrc: %v\n", err)
+		}
+
+		err = utils.AddLineIfFileExists(zshrcPath, lineToAdd)
+		if err != nil {
+			fmt.Printf("Erro ao adicionar linha ao .zshrc: %v\n", err)
+		}
+
+		fmt.Println("Operação concluída.")
+
+		if err != nil {
+			fmt.Println(err)
+		}
+	} else {
+		// Obter segredos do Key Vault e salvar em um arquivo .env
+		secrets.SaveSecretsToFile(client, *appName, outputFilename)
+	}
 }
-
-
